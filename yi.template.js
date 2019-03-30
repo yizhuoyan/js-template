@@ -1,16 +1,13 @@
-(function (window,document) {
-    "use strict";
+(function () {
     /**
-     *
-     *
      * @param {String} nameAndArgs 方法声明为xxx(a,b)
-     * @param {String} templateHtml 字符串模板
+     * @param {String} templateSource 字符串模板
      */
-    var TemplateFunction =window.TemplateFunction= function (nameAndArgs, templateHtml) {
+    let TemplateFunction =window.TemplateFunction= function (nameAndArgs, templateSource) {
         //方法声明格式为xxx或xxx(a,b)
         this.nameAndArgs = nameAndArgs;
         //模板字符串
-        this.templateSource = templateHtml;
+        this.templateSource = templateSource;
         //模板方法名称
         this.functionName=null;
         //模板方法参数
@@ -23,33 +20,26 @@
         privateMethod.init.apply(this);
     };
     //私有方法
-    var privateMethod = {
+    let privateMethod = {
         init: function () {
             //解析
-            var result = staticMethod.parseFunctionNameAndArgumentNames(this.nameAndArgs);
+            let result = staticMethod.parseFunctionNameAndArgumentNames(this.nameAndArgs);
             this.functionName = result[0];
             this.functionArgumentNames = result[1];
         }
     };
     //方法中的
     TemplateFunction.helper={
-        print:function(s,escape/*=true*/){
-            if(s===null||s===undefined)return '';
-            escape=escape||true;
-            if(escape) {
-                return String(s).replace(/[<>&]/g, function (c) {
-                    return {'<': '&lt;', '>': '&gt;', '&': '&amp;'}[c]
-                })
-            }
+        print:function(s,ds){
+            if(s===null||s===undefined)return ds||'';
             return String(s);
-
         },
-        checked:function (b) {
-            return b?"checked":"";
-        },
-        selected:function (b) {
-            return b?"selected":"";
-        }
+		escapePrint:function(s,ds){
+			if(s===null||s===undefined)return ds||'';
+			return String(s).replace(/[<>&]/g, function (c) {
+				return {'<': '&lt;', '>': '&gt;', '&': '&amp;'}[c]
+			})
+		}
     };
     /**
      * 公开方法
@@ -58,188 +48,184 @@
         //构建模板方法
         build: function () {
 
-            var out = this.body;
+            let out = this.body;
             //添加工具方法
-            out.push("var helper=window.TemplateFunction.helper;");
-            out.push("var $=helper.print;");
-            out.push("var $checked=helper.checked;");
-            out.push("var $selected=helper.selected;");
-            out.push("var _='';\n");
+            out.push("let helper=window.TemplateFunction.helper,");
+            out.push("$=helper.print,");
+            out.push("_='';\n");
             //添加try-finally保证模板方法返回值
             out.push("try{\n");
-            out.push("\n");
+			
             //构建方法体
-            staticMethod.parse(this.templateSource, out);
+			out.parseCode = staticMethod.parseCode;
+			out.parseText = staticMethod.parseText;
+			out.parseExpInText = staticMethod.parseExpInText;
+			out.parseExpInCode=staticMethod.parseExpInCode;
+			out.parseTemplate=staticMethod.parseTemplate;
+			
+            out.parseTemplate(this.templateSource,0);
             //添加finally保证模板方法返回值
             out.push("\n}catch(e){console.log(e)}finally{return _;}");
 
-            var funBody = out.join("");
-            var args = this.functionArgumentNames;
+            let funBody = out.join("");
+            let args = this.functionArgumentNames;
             try {
                 //创建方法
-                var f = args ? new Function(args, funBody) : new Function(funBody);
+                let f = args ? new Function(args, funBody) : new Function(funBody);
                 this.functionReference=f;
                 return f;
             } catch (e) {
                 console.log(e);
                 console.log(funBody);
             }
-        },
-        export: function (ctx) {
-            ctx = ctx || window;
-            if (!this.functionReference) {
-                this.build();
-            }
-            ctx[this.functionName] = this.functionReference;
         }
+        
     };
 
-    var staticMethod = {
+    let staticMethod = {
         parseFunctionNameAndArgumentNames: function (funName) {
-            var begin = funName.indexOf("(");
+            let begin = funName.indexOf("(");
             if (begin === -1) {
                 return [funName, null];
             } else {
                 return [funName.substring(0, begin), funName.substring(begin + 1, funName.lastIndexOf(")"))];
             }
         },
-        parse: function (template, out) {
-            /*
-             × 不使用正则，原因如下：
-             * 1)正则效率相对较低
-             * 2)正则很难支持表达式嵌套(主要是我不会)，如$($(....));
-             */
-            var handleJs = staticMethod.parseJs;
-            var handleHtml = staticMethod.parseHtml;
-            var handleHtmlExp = staticMethod.parseHtmlExp;
-            var handleJsExp=staticMethod.parseJsExp;
-            var jsBegin = -1;
-            var expBegin = -1;
-            var htmlBegin = 0;
-            var jsExpBegin=-1;
-            var nestingExp = 0;
-            for (var i = 0, z = template.length, c; i < z; i++) {
-                switch (c = template.charAt(i)) {
-                    case '<':
-                        //may be js block
-                        if (template.charAt(i + 1) === '-') {//yes we got a js block
-                            //handle the previous content
-                            if (htmlBegin !== i) {
-                                handleHtml(template.substring(htmlBegin, i), out);
-                            }
-                            jsBegin = i + 2;
-                            //jump the '-'
-                            i++;
-                        }
-                        break;
-                    case '-':
-                        //may be js block end
-                        if (template.charAt(i + 1) === '>') {
-                            if (jsBegin > 0) {
-                                handleJs(template.substring(jsBegin, i), out);
-                                jsBegin = -1;
-                                htmlBegin = i + 2;
-                                //jump the '>'
-                                i++;
-                            }
-                        }
-                        break;
-                    case '$':
-                        //may be exp
-                        if (template.charAt(i + 1) === '(') {
-                            //handle the previous content
-                            if (htmlBegin !== i) {
-                                //in the js block
-                                if(jsBegin>0){
-                                    jsExpBegin=i+2;
-                                    handleJs(template.substring(jsBegin,i),out);
-                                    jsBegin=-1;
-                                }else {
-                                    expBegin = i + 2;
-                                    handleHtml(template.substring(htmlBegin, i), out);
-                                }
-                            }
-
-                            //jump the '('
-                            i++;
-                        }
-                        break;
-                    case '(':
-                        //nesting exp
-                        if (expBegin > 0||jsExpBegin>0) {
-                            nestingExp++;
-                        }
-                        break;
-                    case ')':
-                        if (expBegin > 0) {
-                            if (nestingExp > 0) {
-                                nestingExp--;
-                            } else {
-                                //exp end
-                                handleHtmlExp(template.substring(expBegin, i), out);
-                                expBegin = -1;
-                                htmlBegin = i + 1;
-                            }
-                        }else if(jsExpBegin>0){
-                            if (nestingExp > 0) {
-                                nestingExp--;
-                            } else {
-                                handleJsExp(template.substring(jsExpBegin, i), out);
-                                jsExpBegin=-1;
-                                jsBegin=i+1;
-                            }
-                        }
-                        break;
-
-                }
-            }
-            //如果最后还有html代码
-            if (htmlBegin<template.length) {
-                handleHtml(template.substr(htmlBegin), out);
-            }
+		parseTemplate:function(template,begin){
+			let textBeginIndex =-1;
+			for (let i = begin, z = template.length,c; i < z; i++) {
+			    c = template.charAt(i);
+				if(c==='<'&&template.charAt(i + 1) === '-'){
+					let codeBeginIndex = i + 2;
+					let codeEndIndex=codeBeginIndex;
+					//find the code end
+					for(;codeEndIndex<z;codeEndIndex++){
+						c=template.charAt(codeEndIndex);
+						 if(c=== '-'&&template.charAt(codeEndIndex + 1) === '>') {
+							 //handle the text
+							 if (textBeginIndex>=0) {
+								if(textBeginIndex!==i){
+									this.parseText(template.substring(textBeginIndex, i));
+									textBeginIndex=-1;
+								}
+							 }		
+							 this.parseCode(template.substring(codeBeginIndex, codeEndIndex),0);
+							 
+							 return this.parseTemplate(template,codeEndIndex+2);
+						 }	
+					}
+				}else if(c==='$'&&template.charAt(i + 1) === '('){
+					let expBeginIndex = i + 2;
+					let expEndIndex=expBeginIndex;
+					let nestingExpCount=1;
+					//find the code end
+					for(;expEndIndex<z;expEndIndex++){
+						c=template.charAt(expEndIndex);
+						
+						if(c==='$'&&template.charAt(expEndIndex + 1) === '(') {
+							nestingExpCount++;
+							console.log(nestingExpCount);
+						}else if(c === ')') {
+							nestingExpCount--;
+							
+							if(nestingExpCount<=0){
+								//handle the text
+								if (textBeginIndex>=0) {
+									if(textBeginIndex!==i){
+										this.parseText(template.substring(textBeginIndex, i));
+										textBeginIndex=-1;
+									}
+								}	
+								this.parseExpInText(template.substring(expBeginIndex, expEndIndex));
+								this.parseTemplate(template,expEndIndex+1);
+								return;
+							}	
+						}	
+					}
+				}else{
+					if(textBeginIndex===-1){
+						textBeginIndex=i;
+					}
+				}
+			}//end for
+		},
+           
+		parseCode: function (code,begin) {
+			console.log(begin)
+            let codeBeginIndex =-1;
+            for (let i= begin, z = code.length,c; i < z; i++) {
+                c = code.charAt(i);
+				if(c==='$'&&code.charAt(i + 1) === '('){
+					let expBeginIndex = i + 2;
+					let expEndIndex=expBeginIndex;
+					let nestingExpCount=1;
+					//find the code end
+					for(;expEndIndex<z;expEndIndex++){
+						c=code.charAt(expEndIndex);
+						if(c=== '$'&&code.charAt(expEndIndex + 1) === '(') {
+							nestingExpCount++;							
+						}else if(c === ')') {
+							nestingExpCount--;
+							if(nestingExpCount<=0){
+								//handle the text
+								if (codeBeginIndex>=0) {
+									if(codeBeginIndex!==i){
+										this.push(code.substring(codeBeginIndex, i));
+										codeBeginIndex=-1;
+									}
+								}	
+								this.parseExpInCode(code.substring(expBeginIndex, expEndIndex));
+								return this.parseCode(code,expEndIndex+1);
+							}	
+						}	
+					}
+					
+				}else{
+					if(codeBeginIndex===-1){
+						codeBeginIndex=i;
+					}
+				}
+			}
+			if (codeBeginIndex>=0) {
+				this.push(code.substr(codeBeginIndex));
+			}	
         },
-        parseJs: function (code, out) {
-            out.push(code);
+		
+        parseExpInText: function (exp) {
+			console.log(exp);
+            this.push("_+=$(" + exp + ");");
         },
-        parseHtmlExp: function (exp,out) {
-            out.push("_+=$(" + exp + ");");
+        parseExpInCode:function (exp) {
+            this.push("_+=$(" + exp + ")");
         },
-        parseJsExp:function (exp,out) {
-            out.push("_+=$(" + exp + ")");
-        },
-        parseHtml: function (html, out) {
-            //不处理空白字符
-            if ((html = html.trim()).length === 0) {
-                return;
-            }
-
+        parseText: function (txt) {
             //双引号转义
-            html = html.replace(/"/g, '\\"');
+            txt = txt.replace(/"/g, '\\"');
             //换行符分割
-            var lines = html.split(/\r?\n/);
+            const lines = txt.split(/\r?\n/);
             if (lines.length > 0) {
-                var i = 0, z = lines.length - 1;
+                let i = 0, z = lines.length - 1;
                 while (i < z) {
                     //一行一行输出,每行多输出一个换行
-                    out.push('_+="' + lines[i++] + '";\n');
+                    this.push('_+="' + lines[i++] + '\\r\\n";\n');
                 }
-                out.push('_+="' + lines[z] + '";');
+                this.push('_+="' + lines[z] + '";');
             }
         }
 
     };
-
-
-    //通过<script type="text/tempate">标签构建模板方法
-    var templates = document.querySelectorAll("script[type='text/template']");
-    Array.prototype.forEach.call(templates, function (t) {
-        var templateHTML = t.innerHTML;
-        var name = t.getAttribute("name");
-        if (!name) {
-            name = t.id;
-        }
-        var tf = new TemplateFunction(name, templateHTML);
-        //直接把模板id暴露为window下方法
-        tf.export(window);
-    });
+	
+	
+    window.addEventListener("load",function(){
+      //通过<script type="text/template">标签构建模板方法
+        let templates = document.querySelectorAll("script[type='text/template']");
+        Array.prototype.forEach.call(templates, function (t) {
+            let templateHTML = t.innerHTML;
+            let id = t.getAttribute("id");
+            let tf = new TemplateFunction(id, templateHTML);
+			//直接把模板id暴露为window下方法
+			window[tf.functionName]=tf.build();
+        });
+    },false);
+    
 })(window, document);
